@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>Cluster Gravity - Final Melting</title>
+    <title>Heavy Hand Cursor</title>
     <style>
         body {
             background-color: #e0e0e0;
@@ -11,183 +11,284 @@
             overflow: hidden;
             width: 100vw;
             height: 100vh;
+            cursor: none; /* Hide default cursor */
+        }
+
+        /* The Custom Hand Cursor */
+        #custom-cursor {
+            position: absolute;
+            
+            /* Sizing: 70px is proportional to the ~100px objects */
+            width: 70px;
+            height: 70px;
+            
+            background-image: url('hand.png');
+            background-size: contain;
+            background-position: center;
+            background-repeat: no-repeat;
+            
+            /* Center the hand on the calculated mouse point */
+            transform: translate(-50%, -50%);
+            
+            pointer-events: none; /* Let clicks pass through */
+            z-index: 9999;
         }
 
         .cluster-container {
             position: absolute;
-            width: 220px; 
-            height: 220px;
+            width: 320px; 
+            height: 320px;
             transform: translate(-50%, -50%);
             z-index: 1000;
-            cursor: pointer; 
+            opacity: 0;
+            transition: opacity 0.8s ease-out; 
+        }
+
+        .cluster-container.visible {
+            opacity: 1;
         }
 
         .cluster-obj {
             position: absolute;
-            transition: none !important; 
             pointer-events: none; 
             user-select: none;
-            
-            /* Visual Polish */
             object-fit: contain; 
-            filter: drop-shadow(0px 10px 15px rgba(0,0,0,0.2)); /* Deep shadow */
-            
-            /* Start with a slight rotation so they look tumbled */
-            transform: translate(-50%, -50%) rotate(0deg);
+            filter: drop-shadow(0px 8px 16px rgba(0,0,0,0.15)); 
+            transform-origin: center center;
+            transition: none;
         }
     </style>
 </head>
 <body>
 
-    <div style="position: absolute; top: 10px; left: 10px; font-family: sans-serif; font-size: 12px; color: #888;">
-        <strong>System Active: "Melting"</strong><br>
-        Physics: Gravity Cascade (No initial push)<br>
-        Scale: Tight Banding (130px - 160px)
-    </div>
+    <div id="custom-cursor"></div>
 
     <script>
+        // --- MOUSE LAG SYSTEM ---
+        const cursorEl = document.getElementById('custom-cursor');
+        
+        let mouseTarget = { x: window.innerWidth/2, y: window.innerHeight/2 };
+        let mouseCurrent = { x: window.innerWidth/2, y: window.innerHeight/2 };
+        
+        // Slower Drag: Reduced from 0.08 to 0.04
+        const DRAG_FACTOR = 0.04; 
+
+        window.addEventListener('mousemove', function(e) {
+            mouseTarget.x = e.clientX;
+            mouseTarget.y = e.clientY;
+        });
+
+        // --- GAME LOGIC ---
+        let activePilesList = [];
+        
+        // We use requestAnimationFrame for the loop, but these manage the collision logic
+        let isLoopRunning = false;
+
         window.addEventListener('load', function() {
             
-            // --- 1. YOUR OBJECT LIST ---
-            // These match the filenames we just generated.
-            // Ensure your actual image files match these exactly.
-            const fileList = [
-                // CLOTHING
-                'heavy-jacket_XHS.png',
-                'fur-vest_LNM.png',
-                'jeans_LHM.png',
-                'waffle-shirt_LNM.png',
-                'brown-waffle_LNM.png',
-                'white-shirt_LNM.png',
-                'polo-shirt_MNM.png',
-                'tshirt_MNM.png',
-                'shorts_MNM.png',
-                'wool-hat_SLM.png',
-                'slippers_MLM.png',
-                'belt_SNS.png',
-
-                // OBJECTS
-                'basketball_LNM.png',
-                'dust-buster_LHS.png',
-                'hand-mixer_MHS.png',
-                'radio_MHS.png',
-                'colander_LNM.png',
-                'baseball-mitt_LHS.png',
-                'headphones_MNM.png',
-                'book_MNS.png',
-                'drink-shaker_MHS.png',
-                'outlet-extender_SHS.png',
-                'frisbee_MLF.png'
+            const masterList = [
+                'heavy-jacket_XHS.png', 'fur-vest_LNM.png', 'jeans_LHM.png',
+                'waffle-shirt_LNM.png', 'brown-waffle_LNM.png', 'white-shirt_LNM.png',
+                'polo-shirt_MNM.png', 'tshirt_MNM.png', 'shorts_MNM.png',
+                'wool-hat_SLM.png', 'slippers_MLM.png', 'belt_SNS.png',
+                'basketball_LNM.png', 'dust-buster_LHS.png', 'hand-mixer_MHS.png',
+                'radio_MHS.png', 'colander_LNM.png', 'baseball-mitt_LHS.png',
+                'headphones_MNM.png', 'book_MNS.png', 'drink-shaker_MHS.png',
+                'outlet-extender_SHS.png', 'frisbee_MLF.png'
             ];
 
-            // --- 2. DEFINITIONS (The "Tight Banding" Scale) ---
-            const DICT = {
-                // SIZES: Very close together for cohesion
-                'S': 130,   
-                'M': 140,  
-                'L': 150, 
-                'X': 160,  
-                
-                // WEIGHTS (Gravity & Drag)
-                'L': { grav: 0.20, drag: 0.96 }, // Floatier
-                'N': { grav: 0.50, drag: 0.98 }, // Standard
-                'H': { grav: 1.20, drag: 0.99 }, // Heavy (Falls fast)
-
-                // ROTATION (Torque)
-                'S': 1.5, // Stable
-                'M': 4,   // Tumble
-                'F': 10   // Spin
+            const ITEM_SIZES = {
+                'belt': 60, 'outlet-extender': 60, 'drink-shaker': 65, 
+                'book': 70, 'basketball': 70, 
+                'headphones': 75, 'wool-hat': 80, 'baseball-mitt': 85, 
+                'frisbee': 85, 'colander': 90, 'hand-mixer': 90, 
+                'radio': 95, 
+                'slippers': 100, 
+                'shorts': 115, 'tshirt': 120, 'polo-shirt': 120,   
+                'dust-buster': 110, 'white-shirt': 125, 
+                'waffle-shirt': 130, 'brown-waffle': 130, 'jeans': 135,        
+                'fur-vest': 150, 'heavy-jacket': 170  
             };
 
-            const FALLBACK = { size: 140, grav: 0.5, drag: 0.98, torque: 3 };
+            const PHYS_MAP = {
+                'L': { grav: 0.15, drag: 0.98 }, 
+                'N': { grav: 0.30, drag: 0.98 }, 
+                'H': { grav: 0.55, drag: 0.99 }  
+            };
 
-            // --- 3. PARSER ---
+            const SPIN_MAP = { 'S': 1.5, 'M': 3, 'F': 5 };
+            const FALLBACK = { size: 80, grav: 0.3, drag: 0.98, torque: 3 };
+
             function decodeFilename(filename) {
                 let raw = filename.split('.')[0]; 
                 let parts = raw.split('_');
                 if(parts.length < 2) return FALLBACK;
+                let nameKey = parts.slice(0, -1).join('_');
                 let code = parts[parts.length - 1].toUpperCase();
-                if (code.length !== 3) return FALLBACK;
+                let sizeVal = ITEM_SIZES[nameKey] || 80;
+                let pCode = (code.length === 3) ? code[1] : 'N';
+                let phys = PHYS_MAP[pCode] || PHYS_MAP['N'];
+                let sCode = (code.length === 3) ? code[2] : 'M';
+                let spin = SPIN_MAP[sCode] || SPIN_MAP['M'];
 
-                return {
-                    sizePx: DICT[code[0]] || FALLBACK.size,
-                    physics: DICT[code[1]] || { grav: FALLBACK.grav, drag: FALLBACK.drag },
-                    rotSpeed: DICT[code[2]] || FALLBACK.torque
-                };
+                return { size: sizeVal, physics: phys, rotSpeed: spin };
             }
 
-            // --- 4. ENGINE ---
             let zIndex = 1000;
+
+            // --- MAIN RENDER LOOP ---
+            function animate() {
+                // 1. Update Custom Cursor (LERP)
+                let dx = mouseTarget.x - mouseCurrent.x;
+                let dy = mouseTarget.y - mouseCurrent.y;
+                
+                mouseCurrent.x += dx * DRAG_FACTOR;
+                mouseCurrent.y += dy * DRAG_FACTOR;
+                
+                cursorEl.style.left = mouseCurrent.x + 'px';
+                cursorEl.style.top = mouseCurrent.y + 'px';
+
+                // 2. Collision Detection
+                // We check if the "Hand" (mouseCurrent) is inside a pile container
+                let activeContainers = document.querySelectorAll('.cluster-container');
+                
+                activeContainers.forEach(container => {
+                    if (container.exploding) return; 
+
+                    let rect = container.getBoundingClientRect();
+                    
+                    // Simple Box Collision
+                    // We check if the center of the hand is within the pile's box
+                    if (mouseCurrent.x > rect.left && 
+                        mouseCurrent.x < rect.right && 
+                        mouseCurrent.y > rect.top && 
+                        mouseCurrent.y < rect.bottom) {
+                        
+                        // Hit!
+                        container.exploding = true;
+                        activePilesList = activePilesList.filter(p => p.id != container.dataset.posId);
+                        melt(container);
+                    }
+                });
+
+                requestAnimationFrame(animate);
+            }
+            animate();
+
+            // --- DIRECTOR ---
+            function director() {
+                let currentCount = document.querySelectorAll('.cluster-container').length;
+
+                if (currentCount < 3) {
+                    createCluster();
+                    setTimeout(director, Math.random() * 400 + 400);
+                } else {
+                    setTimeout(director, 500);
+                }
+            }
 
             function createCluster() {
                 var container = document.createElement('div');
                 container.className = 'cluster-container';
                 
-                var spawnX = Math.random() * (window.innerWidth - 300) + 150;
-                var spawnY = Math.random() * (window.innerHeight * 0.5) + 150;
+                // --- POSITIONING ---
+                let spawnX, spawnY, tooClose;
+                let attempts = 0;
+                
+                do {
+                    tooClose = false;
+                    spawnX = Math.random() * (window.innerWidth - 300) + 150;
+                    spawnY = Math.random() * (window.innerHeight * 0.5) + 150;
+
+                    for (let pos of activePilesList) {
+                        let dx = spawnX - pos.x;
+                        let dy = spawnY - pos.y;
+                        let dist = Math.sqrt(dx*dx + dy*dy);
+                        if (dist < 320) { 
+                            tooClose = true;
+                            break;
+                        }
+                    }
+
+                    if (!tooClose) {
+                        // Check against Mouse TARGET (where you are going)
+                        let dxMouse = spawnX - mouseTarget.x;
+                        let dyMouse = spawnY - mouseTarget.y;
+                        let distMouse = Math.sqrt(dxMouse*dxMouse + dyMouse*dyMouse);
+                        // Increased safety zone slightly for the hand
+                        if (distMouse < 300) {
+                            tooClose = true;
+                        }
+                    }
+                    attempts++;
+                } while (tooClose && attempts < 50);
+
+                let myPos = { x: spawnX, y: spawnY, id: Date.now() + Math.random() };
+                activePilesList.push(myPos);
                 
                 container.style.left = spawnX + 'px';
                 container.style.top = spawnY + 'px';
                 container.style.zIndex = zIndex++;
+                container.dataset.posId = myPos.id;
                 
-                var count = Math.floor(Math.random() * 4) + 3; // 3 to 6 items per cluster
+                var count = Math.floor(Math.random() * 3) + 2; 
 
+                let availableItems = [...masterList]; 
                 container.particles = [];
+                let pileBuffer = [];
 
                 for(var i=0; i<count; i++) {
-                    if(fileList.length === 0) break;
-                    var filename = fileList[Math.floor(Math.random() * fileList.length)];
+                    if(availableItems.length === 0) break;
+                    let randIndex = Math.floor(Math.random() * availableItems.length);
+                    var filename = availableItems[randIndex];
+                    availableItems.splice(randIndex, 1);
                     var dna = decodeFilename(filename);
 
-                    // Create Image
                     var box = document.createElement('img'); 
                     box.src = filename; 
-                    
-                    // Fallback visual (Grey Circle) if image is missing
-                    box.onerror = function() {
-                        this.style.backgroundColor = '#ccc';
-                        this.style.borderRadius = '50%';
-                        this.style.border = '2px solid #888';
-                    };
-
+                    box.onerror = function() { this.style.display = 'none'; };
                     box.className = 'cluster-obj';
-                    box.style.width = dna.sizePx + 'px';
-                    box.style.height = dna.sizePx + 'px'; 
+                    
+                    box.style.width = dna.size + 'px';
+                    box.style.height = dna.size + 'px';
 
-                    // Attach Physics
                     box.dataset.grav = dna.physics.grav;
                     box.dataset.drag = dna.physics.drag;
                     box.dataset.torque = dna.rotSpeed;
 
-                    // Tight Scatter
-                    var scatter = 60; 
-                    var offsetX = (Math.random() - 0.5) * scatter + 110; 
-                    var offsetY = (Math.random() - 0.5) * scatter + 110;
+                    var scatter = 110; 
+                    var relX = (Math.random() - 0.5) * scatter;
+                    var relY = (Math.random() - 0.5) * scatter;
                     
-                    // Initial random rotation
+                    box.dataset.relX = relX;
+                    box.dataset.relY = relY;
+
                     var initialRot = (Math.random() - 0.5) * 60; 
                     box.dataset.currentRot = initialRot;
 
-                    box.style.left = offsetX + 'px';
-                    box.style.top = offsetY + 'px';
+                    box.style.left = (160 + relX) + 'px';
+                    box.style.top = (160 + relY) + 'px';
                     box.style.transform = `translate(-50%, -50%) rotate(${initialRot}deg)`;
 
-                    container.appendChild(box);
-                    container.particles.push(box);
+                    pileBuffer.push({ element: box, size: dna.size });
                 }
 
-                container.onmouseenter = function() {
-                    if(!container.exploding) {
-                        container.exploding = true;
-                        melt(container);
-                        createCluster(); 
-                    }
-                };
+                pileBuffer.sort((a, b) => b.size - a.size);
+
+                pileBuffer.forEach(item => {
+                    container.appendChild(item.element);
+                    container.particles.push(item.element);
+                });
 
                 document.body.appendChild(container);
+
+                requestAnimationFrame(() => {
+                    setTimeout(() => {
+                        container.classList.add('visible');
+                    }, 50);
+                });
             }
 
-            // --- 5. THE MELT ANIMATION ---
             function melt(container) {
                 var children = container.particles;
                 var activeParticles = children.length;
@@ -196,38 +297,34 @@
                 container.style.pointerEvents = 'none';
 
                 children.forEach(function(box, index) {
-                    
-                    // The "Cascade" Delay (80ms per item)
+                    let randomDelay = Math.random() * 150;
                     setTimeout(function() {
-                        
                         var pGrav = parseFloat(box.dataset.grav);
                         var pDrag = parseFloat(box.dataset.drag);
-                        var pTorque = parseFloat(box.dataset.torque);
+                        var rX = parseFloat(box.dataset.relX);
+                        var rY = parseFloat(box.dataset.relY);
 
-                        // START VELOCITY = 0 (Crucial for "melting" feel)
-                        var vx = (Math.random() - 0.5) * 0.5; // Very slight drift
-                        var vy = 0; 
+                        var angle = Math.atan2(rY, rX);
+                        
+                        var pushForce = 1.5 + Math.random(); 
+                        var vx = Math.cos(angle) * pushForce;
+                        var vy = -0.5 - (Math.random() * 0.5); 
                         
                         var x = 0;
                         var y = 0;
                         var r = parseFloat(box.dataset.currentRot);
-                        var rs = (Math.random() < 0.5 ? -1 : 1) * (Math.random() * 0.2); 
+                        var rs = (Math.random() < 0.5 ? -1 : 1) * (Math.random() * 0.8); 
 
                         function loop() {
                             vy += pGrav;     
                             vx *= pDrag;     
-                            
-                            // Spin increases as it falls
-                            rs += (rs > 0 ? 0.05 : -0.05) * (pTorque * 0.08); 
-                            
+                            rs *= 0.99; 
                             x += vx;
                             y += vy;
                             r += rs;
-
                             box.style.transform = `translate(calc(-50% + ${x}px), calc(-50% + ${y}px)) rotate(${r}deg)`;
 
-                            // Kill boundary
-                            if ((startAbsY + y) < window.innerHeight + 400) {
+                            if ((startAbsY + y) < window.innerHeight + 200) {
                                 requestAnimationFrame(loop);
                             } else {
                                 box.remove();
@@ -236,12 +333,11 @@
                             }
                         }
                         requestAnimationFrame(loop);
-
-                    }, index * 80); 
+                    }, randomDelay); 
                 });
             }
 
-            createCluster();
+            director();
         });
     </script>
 </body>
